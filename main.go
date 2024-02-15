@@ -119,7 +119,7 @@ func createTwitchClip() error {
 	return errors.New("Ok, i tried buddy. idk how to tell u this but the clipping faileed...miserably. but dont worry, you can try again #fingercrossed")
 }
 
-func updateTwitchAuth2() error {
+func updateTwitchAuth2() error { // this should work to get the right token
 	url := fmt.Sprintf(
 		"https://id.twitch.tv/oauth2/device?client_id=%v&scopes='clips:edit'",
 		twitchUserProvidedData.clientAppId,

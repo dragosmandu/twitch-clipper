@@ -21,7 +21,7 @@ import (
 type Reponse interface{}
 
 type TwitchData struct {
-	Id                 *string `json:"id"`
+	UserId             *string `json:"user_id"`
 	Username           *string `json:"username"`
 	ClientAppId        *string `json:"client_app_id"`
 	ClientAppSecret    *string `json:"client_app_secret"`
@@ -38,10 +38,6 @@ type TwitchAuth struct {
 	VerificationUrl string `json:"verification_uri"`
 }
 
-type TwitchUser struct {
-	Id string `json:"id"`
-}
-
 type TwitchClip struct {
 	Id      string `json:"id"`
 	EditUrl string `json:"edit_url"`
@@ -54,7 +50,6 @@ const twitchDataFileName = "twitch-data.json"
 var ticker = time.NewTicker(time.Second * 1)
 var twitchData TwitchData
 var twitchAuth TwitchAuth
-var twitchUser TwitchUser = TwitchUser{Id: "770869829"}
 var twitchClip TwitchClip
 
 // - MAIN
@@ -66,13 +61,15 @@ func main() {
 
 	go handleTwitchAuth()
 
-	// err = updateTwitchUser()
+	err := updateTwitchUser()
 
-	// if err != nil {
-	// 	panic(err)
-	// }
+	if err != nil {
+		panic(err)
+	}
 
-	// listenForTwitchClipCommand()
+	for {
+		listenForTwitchClipCommand()
+	}
 }
 
 // - TWITCH
@@ -82,10 +79,8 @@ func listenForTwitchClipCommand() {
 
 	if err != nil {
 		fmt.Println("u r the proble, not the solution. try again")
-		listenForTwitchClipCommand()
 	} else if strings.ToLower(*txt) != "i have small pp" {
 		fmt.Println("the commaand u wrote is soooo wrong, i cannot even")
-		listenForTwitchClipCommand()
 	}
 
 	fmt.Println("creating your new little clip...")
@@ -94,18 +89,15 @@ func listenForTwitchClipCommand() {
 
 	if err != nil {
 		fmt.Println(err)
-		listenForTwitchClipCommand()
 		return
 	}
 
 	fmt.Printf("clip created... %v\n", twitchClip)
-
-	listenForTwitchClipCommand()
 }
 
 func createTwitchClip() error {
-	url := fmt.Sprintf("https://api.twitch.tv/helix/clips?broadcaster_id=%v", twitchUser.Id)
-	headers := map[string]string{"Authorization": "Bearer " + "access_token", "Client-Id": "twitchUserProvidedData.clientAppId"}
+	url := fmt.Sprintf("https://api.twitch.tv/helix/clips?broadcaster_id=%v", *twitchData.UserId)
+	headers := map[string]string{"Content-Type": "application/json", "Authorization": "Bearer " + *twitchData.AccessToken, "Client-Id": *twitchData.ClientAppId}
 	resp, err := do[map[string][]TwitchClip]("POST", url, nil, headers)
 
 	if err != nil {
@@ -121,17 +113,19 @@ func createTwitchClip() error {
 }
 
 func updateTwitchUser() error {
-	url := fmt.Sprintf("https://api.twitch.tv/helix/users?login=%v", "twitchUserProvidedData.username")
-	headers := map[string]string{"Authorization": "Bearer " + "access-token", "Client-Id": "twitchUserProvidedData.clientAppId"}
-	resp, err := do[map[string][]TwitchUser]("GET", url, nil, headers)
+	url := fmt.Sprintf("https://api.twitch.tv/helix/users?login=%v", *twitchData.Username)
+	headers := map[string]string{"Authorization": "Bearer " + *twitchData.AccessToken, "Client-Id": *twitchData.ClientAppId}
+	resp, err := do[map[string][]map[string]any]("GET", url, nil, headers)
 
 	if err != nil {
 		return err
 	}
 
 	if (*resp)["data"] != nil && len((*resp)["data"]) > 0 {
-		twitchUser = (*resp)["data"][0]
-		return nil
+		userId := (*resp)["data"][0]["id"].(string)
+		twitchData.UserId = &userId
+
+		return twitchData.save()
 	}
 
 	return errors.New("Something went wrong, but u not the problem...maybe....OK, it s you")

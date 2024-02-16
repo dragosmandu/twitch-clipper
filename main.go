@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"regexp"
@@ -16,17 +17,13 @@ import (
 
 type Reponse interface{}
 
-type TwitchUserProvidedData struct {
-	username        string
-	clientAppId     string
-	clientAppSecret string
+type TwitchData struct {
+	Id          *string `json:"id"`
+	Username    *string `json:"username"`
+	ClientAppId *string `json:"client_app_id"`
 }
 
 type TwitchAuth struct {
-	AccessToken string `json:"access_token"`
-}
-
-type TwitchAuth2 struct {
 	DeviceCode      string `json:"device_code"`
 	ExpIn           int    `json:"expires_in"`
 	Interval        int    `json:"interval"`
@@ -45,7 +42,7 @@ type TwitchClip struct {
 
 // - VARIABLES
 
-var twitchUserProvidedData TwitchUserProvidedData = TwitchUserProvidedData{username: "cptazazel", clientAppId: "", clientAppSecret: ""}
+var twitchData TwitchData
 var twitchAuth TwitchAuth
 var twitchUser TwitchUser = TwitchUser{Id: "770869829"}
 var twitchClip TwitchClip
@@ -53,13 +50,10 @@ var twitchClip TwitchClip
 // - MAIN
 
 func main() {
-	// err := updateTwitchUserProvidedData()
+	for err := updateTwitchData(); err != nil; {
+	}
 
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	err := updateTwitchAuth2()
+	err := updateTwitchAuth()
 
 	if err != nil {
 		panic(err)
@@ -104,7 +98,7 @@ func listenForTwitchClipCommand() {
 
 func createTwitchClip() error {
 	url := fmt.Sprintf("https://api.twitch.tv/helix/clips?broadcaster_id=%v", twitchUser.Id)
-	headers := map[string]string{"Authorization": "Bearer " + twitchAuth.AccessToken, "Client-Id": twitchUserProvidedData.clientAppId}
+	headers := map[string]string{"Authorization": "Bearer " + "access_token", "Client-Id": "twitchUserProvidedData.clientAppId"}
 	resp, err := do[map[string][]TwitchClip]("POST", url, nil, headers)
 
 	if err != nil {
@@ -119,25 +113,9 @@ func createTwitchClip() error {
 	return errors.New("Ok, i tried buddy. idk how to tell u this but the clipping faileed...miserably. but dont worry, you can try again #fingercrossed")
 }
 
-func updateTwitchAuth2() error { // this should work to get the right token
-	url := fmt.Sprintf(
-		"https://id.twitch.tv/oauth2/device?client_id=%v&scopes='clips:edit'",
-		twitchUserProvidedData.clientAppId,
-	)
-	resp, err := do[TwitchAuth2]("POST", url, nil, nil)
-
-	if err != nil {
-		return err
-	}
-
-	fmt.Println(resp)
-
-	return nil
-}
-
 func updateTwitchUser() error {
-	url := fmt.Sprintf("https://api.twitch.tv/helix/users?login=%v", twitchUserProvidedData.username)
-	headers := map[string]string{"Authorization": "Bearer " + twitchAuth.AccessToken, "Client-Id": twitchUserProvidedData.clientAppId}
+	url := fmt.Sprintf("https://api.twitch.tv/helix/users?login=%v", "twitchUserProvidedData.username")
+	headers := map[string]string{"Authorization": "Bearer " + "access-token", "Client-Id": "twitchUserProvidedData.clientAppId"}
 	resp, err := do[map[string][]TwitchUser]("GET", url, nil, headers)
 
 	if err != nil {
@@ -153,78 +131,82 @@ func updateTwitchUser() error {
 }
 
 func updateTwitchAuth() error {
-	url := fmt.Sprintf(
-		"https://id.twitch.tv/oauth2/token?client_id=%v&client_secret=%v&grant_type=client_credentials",
-		twitchUserProvidedData.clientAppId,
-		twitchUserProvidedData.clientAppSecret,
-	)
-	resp, err := do[TwitchAuth]("POST", url, nil, nil)
+	url := fmt.Sprintf("https://id.twitch.tv/oauth2/device?client_id=%v&scopes=clips:edit", *twitchData.ClientAppId)
+	resp, err := do[TwitchAuth]("POST", url, nil, map[string]string{"Content-Type": "application/x-www-form-urlencoded"})
+
+	if err != nil {
+		return err
+	}
+	// curl --location 'https://id.twitch.tv/oauth2/token' \
+	// --form'client_id="0mmkby2n450y6ho3s2b4xth9fjggz1"' \
+	// --form'scope="channel:manage:broadcast"' \
+	// --form'device_code="ike3GM8QIdYZs43KdrWPIO36LofILoCyFEzjlQ91"' \
+	// --form'grant_type="urn:ietf:params:oauth:grant-type:device_code"'
+	return nil
+}
+
+// - TWITCH DATA
+
+func updateTwitchData() error {
+	const twitchDataFileName = "twitch-data.json"
+	data, _ := os.ReadFile(twitchDataFileName)
+
+	err := json.Unmarshal(data, &twitchData)
+
+	if err == nil && twitchData.Username != nil && twitchData.ClientAppId != nil {
+		command, _ := readStdin("I found your twitch username and client app id, do you want to update them? if yes press 'y': ")
+
+		if command == nil || *command != "y" {
+			return nil
+		}
+	}
+
+	twitchUsername, err := getTwitchUsername()
 
 	if err != nil {
 		return err
 	}
 
-	twitchAuth = *resp
-
-	return nil
-}
-
-// - TWITCH USER PROVIDED DATA
-
-func updateTwitchUserProvidedData() error {
-	errA, errB, errC := updateTwitchUsername(), updateTwitchClientAppId(), updateTwitchClientAppSecret()
-
-	if errA != nil {
-		return errA
-	}
-
-	if errB != nil {
-		return errB
-	}
-
-	return errC
-}
-
-func updateTwitchClientAppSecret() error {
-	twitchClientAppSecret, err := readStdin("Pleeeeeease...kindly tell me your Twitch client app secret: ")
+	twitchClientAppId, err := getTwitchClientAppId()
 
 	if err != nil {
 		return err
 	}
 
-	twitchUserProvidedData.clientAppSecret = *twitchClientAppSecret
+	twitchData = TwitchData{Id: nil, Username: twitchUsername, ClientAppId: twitchClientAppId}
+	data, err = json.MarshalIndent(twitchData, "", " ")
 
-	return nil
+	if err != nil {
+		return nil
+	}
+
+	return os.WriteFile(twitchDataFileName, data, 0644)
 }
 
-func updateTwitchClientAppId() error {
+func getTwitchClientAppId() (*string, error) {
 	twitchClientAppId, err := readStdin("Please tell me your Twitch client app id, or else...: ")
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	twitchUserProvidedData.clientAppId = *twitchClientAppId
-
-	return nil
+	return twitchClientAppId, nil
 }
 
-func updateTwitchUsername() error {
+func getTwitchUsername() (*string, error) {
 	twitchUsername, err := readStdin("Please tell me your Twitch username: ")
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	isTwitchUsernameValid := regexp.MustCompile(`^[a-zA-Z0-9\_]+$`).MatchString(*twitchUsername)
 
 	if !isTwitchUsernameValid {
-		return errors.New("Dummy, your twitch username was invalid :) \n")
+		return nil, errors.New("Dummy, your twitch username was invalid :) \n")
 	}
 
-	twitchUserProvidedData.username = *twitchUsername
-
-	return nil
+	return twitchUsername, nil
 }
 
 // - HELPERS
@@ -270,11 +252,16 @@ func do[R Reponse](method, url string, body, headers map[string]string) (*R, err
 
 	if err != nil {
 		return nil, err
-	} else if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, errors.New(fmt.Sprintf("Request failed with status: %v \n", resp.Status))
 	}
 
 	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+
+		return nil, errors.New(fmt.Sprintf("Request failed with status: %v \n", string(respBody)))
+	}
+
 	var respBodyTarget R
 
 	err = json.NewDecoder(resp.Body).Decode(&respBodyTarget)

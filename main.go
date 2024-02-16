@@ -21,21 +21,16 @@ import (
 type Reponse interface{}
 
 type TwitchData struct {
-	UserId             *string `json:"user_id"`
-	Username           *string `json:"username"`
-	ClientAppId        *string `json:"client_app_id"`
-	ClientAppSecret    *string `json:"client_app_secret"`
-	AccessToken        *string `json:"access_token"`
-	RefreshToken       *string `json:"refresh_token"`
-	ExpiresAtTimestamp *int64  `json:"expires_at_timestamp"`
+	UserId             *string       `json:"user_id"`
+	Username           *string       `json:"username"`
+	ClientAppId        *string       `json:"client_app_id"`
+	ClientAppSecret    *string       `json:"client_app_secret"`
+	AccessToken        *string       `json:"access_token"`
+	RefreshToken       *string       `json:"refresh_token"`
+	ExpiresAtTimestamp *int64        `json:"expires_at_timestamp"`
+	Clips              *[]TwitchClip `json:"clips"`
 
 	mutex sync.Mutex
-}
-
-type TwitchAuth struct {
-	DeviceCode      string `json:"device_code"`
-	UserCode        string `json:"user_code"`
-	VerificationUrl string `json:"verification_uri"`
 }
 
 type TwitchClip struct {
@@ -49,8 +44,6 @@ const twitchDataFileName = "twitch-data.json"
 
 var ticker = time.NewTicker(time.Second * 1)
 var twitchData TwitchData
-var twitchAuth TwitchAuth
-var twitchClip TwitchClip
 
 // - MAIN
 
@@ -69,10 +62,38 @@ func main() {
 
 	for {
 		listenForTwitchClipCommand()
+		twitchData.getLatestTwitchClip()
 	}
 }
 
 // - TWITCH
+
+func (twitchData *TwitchData) getLatestTwitchClip() error {
+	url := fmt.Sprintf("https://api.twitch.tv/helix/clips?id=%v", (*twitchData.Clips)[len(*twitchData.Clips)-1].Id)
+	headers := map[string]string{"Content-Type": "application/json", "Authorization": "Bearer " + *twitchData.AccessToken, "Client-Id": *twitchData.ClientAppId}
+	resp, err := do[map[string][]*any]("GET", url, nil, headers)
+	fmt.Println(err)
+	if err != nil {
+		return err
+	}
+
+	clipUrl := (*(*resp)["data"][0]).(map[string]any)["url"].(string)
+	fmt.Println(clipUrl)
+	out, err := os.Create("clip.mp4")
+
+	if err != nil {
+		return err
+	}
+
+	defer out.Close()
+
+	clipResp, err := http.Get(clipUrl)
+	defer clipResp.Body.Close()
+
+	_, err = io.Copy(out, clipResp.Body)
+
+	return err
+}
 
 func listenForTwitchClipCommand() {
 	txt, err := readStdin("create a new clip by writing 'i have small pp' in the terminal :> \n")
@@ -92,7 +113,7 @@ func listenForTwitchClipCommand() {
 		return
 	}
 
-	fmt.Printf("clip created... %v\n", twitchClip)
+	fmt.Println("i super duper awesome cuz i just cliped your stream...u r welcome")
 }
 
 func createTwitchClip() error {
@@ -105,7 +126,12 @@ func createTwitchClip() error {
 	}
 
 	if (*resp)["data"] != nil && len((*resp)["data"]) > 0 {
-		twitchClip = (*resp)["data"][0]
+		if twitchData.Clips == nil {
+			array := make([]TwitchClip, 0)
+			twitchData.Clips = &array
+		}
+		*twitchData.Clips = append(*twitchData.Clips, (*resp)["data"][0])
+		twitchData.save()
 		return nil
 	}
 

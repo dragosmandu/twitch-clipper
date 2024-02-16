@@ -9,8 +9,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 )
 
 // - TYPES
@@ -18,15 +21,19 @@ import (
 type Reponse interface{}
 
 type TwitchData struct {
-	Id          *string `json:"id"`
-	Username    *string `json:"username"`
-	ClientAppId *string `json:"client_app_id"`
+	Id                 *string `json:"id"`
+	Username           *string `json:"username"`
+	ClientAppId        *string `json:"client_app_id"`
+	ClientAppSecret    *string `json:"client_app_secret"`
+	AccessToken        *string `json:"access_token"`
+	RefreshToken       *string `json:"refresh_token"`
+	ExpiresAtTimestamp *int64  `json:"expires_at_timestamp"`
+
+	mutex sync.Mutex
 }
 
 type TwitchAuth struct {
 	DeviceCode      string `json:"device_code"`
-	ExpIn           int    `json:"expires_in"`
-	Interval        int    `json:"interval"`
 	UserCode        string `json:"user_code"`
 	VerificationUrl string `json:"verification_uri"`
 }
@@ -40,8 +47,11 @@ type TwitchClip struct {
 	EditUrl string `json:"edit_url"`
 }
 
-// - VARIABLES
+// - VARIABLES & CONSTANTS
 
+const twitchDataFileName = "twitch-data.json"
+
+var ticker = time.NewTicker(time.Second * 1)
 var twitchData TwitchData
 var twitchAuth TwitchAuth
 var twitchUser TwitchUser = TwitchUser{Id: "770869829"}
@@ -50,14 +60,11 @@ var twitchClip TwitchClip
 // - MAIN
 
 func main() {
+	defer ticker.Stop()
 	for err := updateTwitchData(); err != nil; {
 	}
 
-	err := updateTwitchAuth()
-
-	if err != nil {
-		panic(err)
-	}
+	go handleTwitchAuth()
 
 	// err = updateTwitchUser()
 
@@ -130,31 +137,107 @@ func updateTwitchUser() error {
 	return errors.New("Something went wrong, but u not the problem...maybe....OK, it s you")
 }
 
+func handleTwitchAuth() {
+	for {
+		<-ticker.C
+
+		twitchData.mutex.Lock()
+		defer twitchData.mutex.Unlock()
+		for *twitchData.ExpiresAtTimestamp <= time.Now().Unix() {
+			err := updateTwitchAccessToken()
+
+			if err != nil {
+				updateTwitchAuth()
+			}
+		}
+	}
+}
+
+// - TWITCH AUTHORIZATION
+
+func updateTwitchAccessToken() error {
+	url := fmt.Sprintf(
+		"https://id.twitch.tv/oauth2/token?grant_type=refresh_token&refresh_token=%v&client_id=%v&client_secret=%v",
+		*twitchData.RefreshToken, *twitchData.ClientAppId, *twitchData.ClientAppSecret,
+	)
+
+	resp, err := do[map[string]*any]("POST", url, nil, map[string]string{"Content-Type": "application/x-www-form-urlencoded"})
+
+	if err != nil {
+		return nil
+	}
+
+	accessToken := (*(*resp)["access_token"]).(string)
+	refreshToken := (*(*resp)["refresh_token"]).(string)
+	expiresAtTimestamp := time.Now().Unix() + int64((*(*resp)["expires_in"]).(float64)) - 300
+
+	twitchData.AccessToken = &accessToken
+	twitchData.RefreshToken = &refreshToken
+	twitchData.ExpiresAtTimestamp = &expiresAtTimestamp
+
+	return twitchData.save()
+}
+
 func updateTwitchAuth() error {
 	url := fmt.Sprintf("https://id.twitch.tv/oauth2/device?client_id=%v&scopes=clips:edit", *twitchData.ClientAppId)
-	resp, err := do[TwitchAuth]("POST", url, nil, map[string]string{"Content-Type": "application/x-www-form-urlencoded"})
+	resp, err := do[map[string]*any]("POST", url, nil, map[string]string{"Content-Type": "application/x-www-form-urlencoded"})
 
 	if err != nil {
 		return err
 	}
-	// curl --location 'https://id.twitch.tv/oauth2/token' \
-	// --form'client_id="0mmkby2n450y6ho3s2b4xth9fjggz1"' \
-	// --form'scope="channel:manage:broadcast"' \
-	// --form'device_code="ike3GM8QIdYZs43KdrWPIO36LofILoCyFEzjlQ91"' \
-	// --form'grant_type="urn:ietf:params:oauth:grant-type:device_code"'
-	return nil
+
+	deviceCode := (*(*resp)["device_code"]).(string)
+	userCode := (*(*resp)["user_code"]).(string)
+	verificationUrl := (*(*resp)["verification_uri"]).(string)
+
+	if !strings.Contains(verificationUrl, userCode) {
+		return errors.New("Verification URL doesnt contain the right user code")
+	}
+
+	if err := openBrowser(verificationUrl); err != nil {
+		return err
+	}
+
+	txt, err := readStdin("Type 'y' when u authorized the device: ")
+
+	if err != nil {
+		return err
+	}
+
+	if *txt != "y" {
+		return errors.New("yoou have to press 'y'...dummyyyyy")
+	}
+
+	url = fmt.Sprintf(
+		"https://id.twitch.tv/oauth2/token?client_id=%v&scope=clips:edit&device_code=%v&grant_type=urn:ietf:params:oauth:grant-type:device_code",
+		*twitchData.ClientAppId, deviceCode,
+	)
+	resp, err = do[map[string]*any]("POST", url, nil, nil)
+
+	if err != nil {
+		return err
+	}
+
+	accessToken := (*(*resp)["access_token"]).(string)
+	refreshToken := (*(*resp)["refresh_token"]).(string)
+	expiresAtTimestamp := time.Now().Unix() + int64((*(*resp)["expires_in"]).(float64)) - 300
+
+	twitchData.AccessToken = &accessToken
+	twitchData.RefreshToken = &refreshToken
+	twitchData.ExpiresAtTimestamp = &expiresAtTimestamp
+
+	return twitchData.save()
 }
 
-// - TWITCH DATA
+// - TWITCH STORED DATA
 
 func updateTwitchData() error {
-	const twitchDataFileName = "twitch-data.json"
 	data, _ := os.ReadFile(twitchDataFileName)
 
 	err := json.Unmarshal(data, &twitchData)
 
-	if err == nil && twitchData.Username != nil && twitchData.ClientAppId != nil {
-		command, _ := readStdin("I found your twitch username and client app id, do you want to update them? if yes press 'y': ")
+	if err == nil && twitchData.Username != nil && twitchData.ClientAppId != nil && twitchData.ClientAppSecret != nil {
+		command, _ := readStdin("I found your twitch username, client app id & secret, do you want to update them? if yes press 'y': ")
 
 		if command == nil || *command != "y" {
 			return nil
@@ -173,14 +256,27 @@ func updateTwitchData() error {
 		return err
 	}
 
-	twitchData = TwitchData{Id: nil, Username: twitchUsername, ClientAppId: twitchClientAppId}
-	data, err = json.MarshalIndent(twitchData, "", " ")
+	twitchClientAppSecret, err := getTwitchClientAppSecret()
 
 	if err != nil {
 		return nil
 	}
 
-	return os.WriteFile(twitchDataFileName, data, 0644)
+	twitchData.Username = twitchUsername
+	twitchData.ClientAppId = twitchClientAppId
+	twitchData.ClientAppSecret = twitchClientAppSecret
+
+	return twitchData.save()
+}
+
+func getTwitchClientAppSecret() (*string, error) {
+	twitchClientAppSecret, err := readStdin("Now...the twitch client app secret...hurrrryyyyy: ")
+
+	if err != nil {
+		return nil, err
+	}
+
+	return twitchClientAppSecret, nil
 }
 
 func getTwitchClientAppId() (*string, error) {
@@ -271,4 +367,22 @@ func do[R Reponse](method, url string, body, headers map[string]string) (*R, err
 	}
 
 	return &respBodyTarget, nil
+}
+
+func (twitchData *TwitchData) save() error {
+	return writeToFile(twitchDataFileName, twitchData)
+}
+
+func writeToFile(fileName string, data any) error {
+	json, err := json.Marshal(data)
+
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(fileName, json, 0644)
+}
+
+func openBrowser(url string) error {
+	return exec.Command("cmd", []string{"/c", "start", url}...).Start()
 }

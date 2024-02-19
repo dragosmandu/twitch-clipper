@@ -40,19 +40,22 @@ var twitchData TwitchData
 // - Twitch
 
 func ConfigureTwitch() {
-	for err := updateTwitchInputData(); err != nil; {
+	for err := helpers.InstallPrereq(); err != nil; {
 	}
 
-	go func() {
-		for err := handleTwitchAuth(); err != nil; {
-			if txt, _ := helpers.ReadStdin("i failed to get twitch authorization, do you want to try again? press 'y' for yes: "); *txt != "y" {
-				break
-			}
-		}
-	}()
+	// for err := updateTwitchInputData(); err != nil; {
+	// }
 
-	for waitForTwitchClipCommand(); ; {
-	}
+	// go func() {
+	// 	for err := handleTwitchAuth(); err != nil; {
+	// 		if txt, _ := helpers.ReadStdin("i failed to get twitch authorization, do you want to try again? press 'y' for yes: "); *txt != "y" {
+	// 			break
+	// 		}
+	// 	}
+	// }()
+
+	// for waitForTwitchClipCommand(); ; {
+	// }
 }
 
 // - Twitch API

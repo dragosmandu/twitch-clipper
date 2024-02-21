@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dragosmandu/twitch-clipper/packages/helpers"
+	"github.com/dragosmandu/twitch-clipper/packages/video"
 )
 
 type TwitchData struct {
@@ -31,9 +32,9 @@ type TwitchClip struct {
 	EditUrl string `json:"edit_url"`
 }
 
-const twitchDataFileName = "twitch-data.json"
-const twitchClipsFileName = "twitch-clips.txt"
-const twitchClipFileName = "twitch-clip.mp4"
+const twitchDataFileName = "./resources/twitch-data.json"
+const twitchClipsFileName = "./resources/twitch-clips.txt"
+const twitchClipFileName = "./resources/twitch-clip.mp4"
 
 var twitchData TwitchData
 
@@ -43,19 +44,20 @@ func ConfigureTwitch() {
 	for err := helpers.InstallPrereq(); err != nil; {
 	}
 
-	// for err := updateTwitchInputData(); err != nil; {
-	// }
+	for err := updateTwitchInputData(); err != nil; {
+	}
 
-	// go func() {
-	// 	for err := handleTwitchAuth(); err != nil; {
-	// 		if txt, _ := helpers.ReadStdin("i failed to get twitch authorization, do you want to try again? press 'y' for yes: "); *txt != "y" {
-	// 			break
-	// 		}
-	// 	}
-	// }()
+	go func() {
+		for err := handleTwitchAuth(); err != nil; {
+			if txt, _ := helpers.ReadStdin("i failed to get twitch authorization, do you want to try again? press 'y' for yes: "); *txt != "y" {
+				break
+			}
+		}
+	}()
 
-	// for waitForTwitchClipCommand(); ; {
-	// }
+	for {
+		waitForTwitchClipCommand()
+	}
 }
 
 // - Twitch API
@@ -105,8 +107,10 @@ func waitForTwitchClipCommand() {
 
 	if err != nil {
 		fmt.Println("u r the proble, not the solution. try again")
+		return
 	} else if strings.ToLower(*txt) != "i have small pp" {
 		fmt.Println("the commaand u wrote is soooo wrong, i cannot even")
+		return
 	}
 
 	fmt.Println("creating your new little clip...")
@@ -136,6 +140,11 @@ func createTwitchClip() error {
 
 		if err1 := downloadTwitchClip(downloadUrl); err1 != nil || err != nil {
 			fmt.Printf("I failed to download and share the latest clip, but you may see it in the 'twitch-clips.txt' file... hehe %v %v\n", err, err1)
+			return err
+		}
+
+		if err := video.CreatePortraitVideo(); err != nil {
+			fmt.Printf("something went wrong and it s only your fing fault...%v \n", err)
 		}
 
 		return helpers.AppendToFile(twitchClipsFileName, fmt.Sprintf("Captured on %v: %v \n", time.Now().Format(time.RFC3339), (*resp)["data"][0].EditUrl))
